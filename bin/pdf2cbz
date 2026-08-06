@@ -1,0 +1,68 @@
+#!/bin/bash
+# pdf2cbz — losslessly convert comic-book PDFs to CBZ.
+# Part of comicdown: https://github.com/jeffalldridge/comicdown
+#
+# Targets macOS system bash 3.2: no associative arrays; never expand an
+# array that may be empty while set -u is active.
+
+VERSION="0.1.0"
+RENDER_DPI=300
+RENDER_QUALITY=90
+NOTIFY=0
+
+die() { printf 'pdf2cbz: %s\n' "$1" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: pdf2cbz [--notify] file.pdf [more.pdf ...]
+
+Losslessly extracts the embedded page images from comic-book PDFs and packs
+them into a .cbz next to each source file. Pages that cannot be extracted
+losslessly are rendered at 300 DPI and reported.
+
+Options:
+  --notify     Also report via macOS notification (used by the Quick Action)
+  --version    Print version
+  -h, --help   Show this help
+EOF
+}
+
+notify() {
+  osascript -e "display notification \"${1//\"/\\\"}\" with title \"comicdown\"" \
+    >/dev/null 2>&1 || true
+}
+
+check_deps() {
+  local cmd missing=""
+  for cmd in pdfinfo pdfimages pdftoppm; do
+    command -v "$cmd" >/dev/null || missing="$missing $cmd"
+  done
+  if [ -n "$missing" ]; then
+    local msg="missing$missing — install with: brew install poppler"
+    if [ "$NOTIFY" = 1 ]; then notify "$msg"; fi
+    die "$msg"
+  fi
+}
+
+main() {
+  local files_count=0
+  FILES=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --notify) NOTIFY=1 ;;
+      --version) printf 'pdf2cbz %s\n' "$VERSION"; exit 0 ;;
+      -h|--help) usage; exit 0 ;;
+      -*) die "unknown option: $1 (see --help)" ;;
+      *) FILES[$files_count]="$1"; files_count=$((files_count + 1)) ;;
+    esac
+    shift
+  done
+  [ "$files_count" -gt 0 ] || { usage >&2; exit 1; }
+  check_deps
+  die "conversion not implemented yet"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  set -euo pipefail
+  main "$@"
+fi
