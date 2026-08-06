@@ -23,8 +23,20 @@ git clone https://github.com/jeffalldridge/comicdown.git
 
 Optionally add `comicdown/bin` to your `PATH`.
 
-**Quick Action:** double-click `quick-action/PDF to CBZ.workflow` and choose
-Install. Then right-click any PDF in Finder → Quick Actions → **PDF to CBZ**.
+**Quick Action:** install with
+
+```sh
+cp -R "quick-action/PDF to CBZ.workflow" ~/Library/Services/
+```
+
+(You can also double-click the `.workflow` and choose Install, but note macOS
+*moves* the file there rather than copying it — restore your checkout with
+`git checkout -- quick-action` afterward.)
+
+Then enable it once: right-click any PDF in Finder → Quick Actions →
+**Customize…** and check **PDF to CBZ**. From then on it's available at
+right-click → Quick Actions → **PDF to CBZ** (it also appears under the
+Services submenu).
 
 ## Use
 
