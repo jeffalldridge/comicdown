@@ -845,7 +845,7 @@ Expected: new tests FAIL with `needs fallback rendering (not implemented yet)`.
 # render_page pdf page tmp: render one page to $tmp/render-$page/ as JPEG.
 render_page() {
   local pdf="$1" page="$2" tmp="$3"
-  mkdir -p "$tmp/render-$page"
+  mkdir -p "$tmp/render-$page" || return 1
   pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$RENDER_DPI" \
     -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>/dev/null
   [ -n "$(find "$tmp/render-$page" -type f | head -n 1)" ]
