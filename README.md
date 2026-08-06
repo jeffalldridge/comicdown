@@ -41,8 +41,9 @@ Another.cbz: 22/24 pages lossless; rendered: 3 (96 DPI), 17 (300 DPI)
 ```
 
 A `.cbz.log` sidecar appears only when fallback occurred, recording the
-per-page reasons and the DPI each was rendered at (`mask`, `multi-image`,
-`enc:ccitt`, `cmyk`, `no-image`).
+per-page reasons and the DPI each was rendered at: `mask`, `multi-image`,
+`cmyk`, `no-image`, `enc:<encoding>` (e.g. `enc:ccitt`, `enc:jbig2`), or the
+rare `missing-extraction`.
 
 ## Roadmap
 
