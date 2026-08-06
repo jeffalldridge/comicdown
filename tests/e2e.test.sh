@@ -59,3 +59,34 @@ case "$OUT" in
   *"pages lossless"*) fail "output falsely claims success: $OUT" ;;
   *) ok ;;
 esac
+
+begin "e2e masked-page: converts with fallback"
+cp fixtures/masked-page.pdf "$WORK/"
+OUT=$("$PDF2CBZ" "$WORK/masked-page.pdf" 2>&1)
+assert_file "$WORK/masked-page.cbz"
+
+begin "e2e masked-page: summary reports the rendered page"
+assert_match "$OUT" "1/2 pages lossless"
+
+begin "e2e masked-page: summary names page 2"
+assert_match "$OUT" "rendered at 300 DPI: 2"
+
+begin "e2e masked-page: sidecar log written with reason"
+assert_file "$WORK/masked-page.cbz.log"
+LOG=$(cat "$WORK/masked-page.cbz.log")
+assert_match "$LOG" "page 2: mask"
+
+begin "e2e masked-page: cbz still has 2 pages"
+mkdir -p "$WORK/gotmask"
+unzip -qo "$WORK/masked-page.cbz" -d "$WORK/gotmask"
+N=$(find "$WORK/gotmask" -type f | wc -l | tr -d ' ')
+assert_eq "$N" "2"
+
+begin "e2e multi-image-page: layered page falls back, other stays lossless"
+cp fixtures/multi-image-page.pdf "$WORK/"
+OUT=$("$PDF2CBZ" "$WORK/multi-image-page.pdf" 2>&1)
+assert_match "$OUT" "1/2 pages lossless"
+
+begin "e2e multi-image-page: log says multi-image"
+LOG=$(cat "$WORK/multi-image-page.cbz.log")
+assert_match "$LOG" "page 2: multi-image"
