@@ -440,7 +440,7 @@ git commit -m "test: fixture generator and committed fixture PDFs"
 - Modify: `bin/pdf2cbz` (add `classify_pages` after `check_deps`)
 - Create: `tests/classifier.test.sh`
 
-`classify_pages` reads `pdfimages -list` text on stdin, takes the page count as `$1`, and prints one line per page: `<page> lossless -` or `<page> fallback <reason>`. Reasons: `mask`, `multi-image`, `enc:<enc>`, `cmyk`, `no-image`.
+`classify_pages` reads `pdfimages -list` text on stdin, takes the page count as `$1`, and prints one line per page: `<page> lossless - <dpi>` or `<page> fallback <reason> <dpi>`. Reasons: `mask`, `multi-image`, `enc:<enc>`, `cmyk`, `no-image`. `<dpi>` is the page's suggested render density (max x-ppi/y-ppi over its raster images, clamped 72-600) or `-` when the page has no raster images — added by the Task 13 smart-DPI amendment.
 
 - [ ] **Step 1: Write failing unit tests `tests/classifier.test.sh`**
 
@@ -457,72 +457,101 @@ HEADER='page   num  type   width height color comp bpc  enc interp  object ID x-
 
 begin "classifier: clean jpeg pages are lossless"
 OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n   2     1 image     100   150  rgb     3   8  jpeg   no        12  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 2)
-assert_eq "$OUT" "1 lossless -
-2 lossless -"
+assert_eq "$OUT" "1 lossless - 300
+2 lossless - 300"
 
 begin "classifier: flate (enc=image) is lossless"
 OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  image  no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 lossless -"
+assert_eq "$OUT" "1 lossless - 300"
 
 begin "classifier: smask forces fallback"
 OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n   1     1 smask     100   150  gray    1   8  image  no        11  0   300   300  5K  9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 fallback mask"
+assert_eq "$OUT" "1 fallback mask 300"
 
 begin "classifier: two images on a page forces fallback"
 OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n   1     1 image     100   150  rgb     3   8  jpeg   no        11  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 fallback multi-image"
+assert_eq "$OUT" "1 fallback multi-image 300"
 
 begin "classifier: ccitt encoding forces fallback"
 OUT=$(printf '%s\n   1     0 image     100   150  gray    1   1  ccitt  no        10  0   300   300  2K  9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 fallback enc:ccitt"
+assert_eq "$OUT" "1 fallback enc:ccitt 300"
 
 begin "classifier: jbig2 encoding forces fallback"
 OUT=$(printf '%s\n   1     0 image     100   150  gray    1   1  jbig2  no        10  0   300   300  2K  9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 fallback enc:jbig2"
+assert_eq "$OUT" "1 fallback enc:jbig2 300"
 
 begin "classifier: cmyk jpeg forces fallback"
 OUT=$(printf '%s\n   1     0 image     100   150  cmyk    4   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
-assert_eq "$OUT" "1 fallback cmyk"
+assert_eq "$OUT" "1 fallback cmyk 300"
 
 begin "classifier: page with no raster image falls back (vector/text page)"
 OUT=$(printf '%s\n   2     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 2)
-assert_eq "$OUT" "1 fallback no-image
-2 lossless -"
+assert_eq "$OUT" "1 fallback no-image -
+2 lossless - 300"
+
+begin "classifier: icc 4-component jpeg forces fallback"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     4   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 fallback cmyk 300"
+
+begin "classifier: icc 3-component jpeg is lossless"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 300"
+
+begin "classifier: low ppi clamps to 72"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0    12     7  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 72"
+
+begin "classifier: high ppi clamps to 600"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   900   880  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 600"
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `tests/run.sh`
-Expected: the 8 classifier tests FAIL (`classify_pages: command not found` surfaces as empty output mismatches); cli tests still pass.
+Expected: the 12 classifier tests FAIL (`classify_pages: command not found` surfaces as empty output mismatches); cli tests still pass.
 
 - [ ] **Step 3: Implement `classify_pages` in `bin/pdf2cbz`** (insert after `check_deps`)
 
 ```bash
 # classify_pages: stdin = `pdfimages -list` output, $1 = page count.
-# Prints one line per page: "<page> lossless -" or "<page> fallback <reason>".
-# Lossless requires exactly one real raster image, encoded as jpeg (DCT) or
-# image (flate), in a non-CMYK colorspace, with no masks/stencils on the page.
+# Prints one line per page: "<page> <status> <reason> <dpi>". status is
+# lossless or fallback; dpi is the page's suggested render density (max
+# x-ppi/y-ppi over its raster images, clamped 72-600) or "-" if the page has
+# no raster images. Lossless requires exactly one real raster image, encoded
+# as jpeg (DCT) or image (flate), in a non-CMYK colorspace, with no
+# masks/stencils on the page.
 classify_pages() {
   awk -v pages="$1" '
     NR <= 2 { next }          # header + separator
     NF < 9 { next }
     {
-      page = $1; type = $3; color = $6; enc = $9
+      page = $1; type = $3; color = $6; comp = $7; enc = $9
       if (type == "image") {
         count[page]++
         if (count[page] > 1 && !(page in reason)) reason[page] = "multi-image"
         if (enc != "jpeg" && enc != "image" && !(page in reason)) reason[page] = "enc:" enc
-        if (color == "cmyk" && !(page in reason)) reason[page] = "cmyk"
+        if ((color == "cmyk" || comp == 4) && !(page in reason)) reason[page] = "cmyk"
+        xp = $13 + 0; yp = $14 + 0
+        m = (xp > yp) ? xp : yp
+        if (m > 0 && m > ppi[page]) ppi[page] = m
       } else if (!(page in reason)) {
         reason[page] = "mask"   # smask/stencil rows need compositing
       }
     }
     END {
       for (p = 1; p <= pages; p++) {
-        if (p in reason)          print p, "fallback", reason[p]
-        else if (count[p] == 1)   print p, "lossless", "-"
-        else if (count[p] == "")  print p, "fallback", "no-image"
-        else                      print p, "fallback", "multi-image"
+        if (ppi[p] > 0) {
+          d = ppi[p]
+          if (d < 72) d = 72
+          if (d > 600) d = 600
+        } else {
+          d = "-"
+        }
+        if (p in reason)          print p, "fallback", reason[p], d
+        else if (count[p] == 1)   print p, "lossless", "-", d
+        else if (count[p] == "")  print p, "fallback", "no-image", d
+        else                      print p, "fallback", "multi-image", d
       }
     }'
 }
@@ -531,7 +560,12 @@ classify_pages() {
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `12 passed, 0 failed`.
+Expected: `16 passed, 0 failed`.
+
+> **2026-08-05 amendment:** the 4th field and the two clamp tests above were
+> added by Task 13 (smart-DPI fallback), after the count had grown to 43;
+> the `16 passed` figure here is what Task 4 alone would produce if written
+> today, not the count at the time Task 4 originally shipped.
 
 - [ ] **Step 5: Commit**
 
@@ -591,12 +625,33 @@ mkdir -p "$WORK/gotpng"
 unzip -qo "$WORK/png-book.cbz" -d "$WORK/gotpng"
 N=$(find "$WORK/gotpng" -name '*.png' | wc -l | tr -d ' ')
 assert_eq "$N" "2"
+
+begin "e2e gnarly filename: spaces, apostrophe, parens"
+cp fixtures/jpeg-book.pdf "$WORK/My Comic's Vol. 2 (2019).pdf"
+OUT=$("$PDF2CBZ" "$WORK/My Comic's Vol. 2 (2019).pdf" 2>&1)
+assert_file "$WORK/My Comic's Vol. 2 (2019).cbz"
+assert_match "$OUT" "3/3 pages lossless"
+
+begin "e2e read-only dir: fails loudly, no false success"
+mkdir "$WORK/ro"
+cp fixtures/jpeg-book.pdf "$WORK/ro/"
+chmod 555 "$WORK/ro"
+if OUT=$("$PDF2CBZ" "$WORK/ro/jpeg-book.pdf" 2>&1); then
+  fail "expected nonzero exit"
+else
+  ok
+fi
+chmod 755 "$WORK/ro"
+case "$OUT" in
+  *"pages lossless"*) fail "output falsely claims success: $OUT" ;;
+  *) ok ;;
+esac
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `tests/run.sh`
-Expected: e2e tests FAIL with `conversion not implemented yet`; 12 prior tests pass.
+Expected: e2e tests FAIL with `conversion not implemented yet`; 14 prior tests pass.
 
 - [ ] **Step 3: Implement the pipeline in `bin/pdf2cbz`**
 
@@ -614,6 +669,7 @@ find_page_image() {
     base="${f##*/}"
     p="${base#img-}"
     p="${p%%-*}"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
     if [ "$((10#$p))" -eq "$page" ]; then
       printf '%s\n' "$f"
       return 0
@@ -625,7 +681,6 @@ find_page_image() {
 # out_path pdf -> collision-free sibling .cbz path
 out_path() {
   local base="${1%.[Pp][Dd][Ff]}"
-  [ "$base" = "$1" ] && base="$1"
   local out="$base.cbz" n=1
   while [ -e "$out" ]; do
     out="$base ($n).cbz"
@@ -645,9 +700,10 @@ convert_pdf() {
   esac
 
   local tmp stage
-  tmp=$(mktemp -d "$TMP_ROOT/pdf.XXXXXX")
+  tmp=$(mktemp -d "$TMP_ROOT/pdf.XXXXXX") || {
+    printf '%s: cannot create temp dir\n' "$pdf" >&2; return 1; }
   stage="$tmp/stage"
-  mkdir "$stage"
+  mkdir "$stage" || { printf '%s: cannot create staging dir\n' "$pdf" >&2; return 1; }
 
   local plan
   plan=$(pdfimages -list "$pdf" 2>/dev/null | classify_pages "$pages")
@@ -657,45 +713,65 @@ convert_pdf() {
   if [ "$width" -lt 3 ]; then width=3; fi
   # NOTE: never use `[ cond ] && cmd` for optional steps in this script —
   # under set -e a false condition aborts the whole run. Always if/then.
+  #
+  # NOTE: convert_pdf is invoked as `if summary=$(convert_pdf ...); then` in
+  # main. Because the whole call sits in a tested command substitution, bash
+  # suppresses errexit for every command inside this function body, not just
+  # the top-level call — a well-known bash gotcha. So nothing in here can
+  # rely on `set -e` to stop a failed step; every side-effecting command
+  # (mkdir, cp, sips, zip, mv, ...) must be explicitly checked.
 
-  local page status reason src ext dest
+  local page status reason dpi rdpi src ext dest copy_failed
   local fallback_list="" fallback_count=0
   : > "$tmp/reasons.txt"
-  while read -r page status reason; do
+  while read -r page status reason dpi; do
+    copy_failed=0
     src=""
     if [ "$status" = "lossless" ]; then
       src=$(find_page_image "$tmp" "$page") || reason="missing-extraction"
     fi
     if [ -z "$src" ]; then
-      render_page "$pdf" "$page" "$tmp" || {
-        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2; return 1; }
-      src=$(find "$tmp/render-$page" -type f | head -n 1)
-      fallback_list="${fallback_list:+$fallback_list, }$page"
+      rdpi="$RENDER_DPI"
+      if [ "$dpi" != "-" ]; then rdpi="$dpi"; fi
+      render_page "$pdf" "$page" "$tmp" "$rdpi" || {
+        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2
+        if [ -s "$tmp/render-$page.err" ]; then cat "$tmp/render-$page.err" >&2; fi
+        return 1; }
+      src=$(find "$tmp/render-$page" -type f -size +0 | head -n 1)
+      fallback_list="${fallback_list:+$fallback_list, }$page ($rdpi DPI)"
       fallback_count=$((fallback_count + 1))
-      printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$RENDER_DPI" >> "$tmp/reasons.txt"
+      printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$rdpi" >> "$tmp/reasons.txt"
     fi
     ext="${src##*.}"
     dest=$(printf '%s/%0*d' "$stage" "$width" "$page")
     case "$ext" in
-      tif|tiff) sips -s format png "$src" --out "$dest.png" >/dev/null ;;
-      jpeg)     cp "$src" "$dest.jpg" ;;
-      *)        cp "$src" "$dest.$ext" ;;
+      # tif/tiff shouldn't reach here today — classify_pages already routes
+      # CMYK/TIFF-producing pages to fallback, so this is belt-and-suspenders.
+      tif|tiff) sips -s format png "$src" --out "$dest.png" >/dev/null 2>&1 || copy_failed=1 ;;
+      jpeg)     cp "$src" "$dest.jpg" || copy_failed=1 ;;
+      *)        cp "$src" "$dest.$ext" || copy_failed=1 ;;
     esac
+    if [ "${copy_failed:-0}" = 1 ]; then
+      printf '%s: page %s failed to stage\n' "$pdf" "$page" >&2
+      return 1
+    fi
   done <<EOF
 $plan
 EOF
 
   local out name
   out=$(out_path "$pdf")
-  (cd "$stage" && zip -q -0 -X "$tmp/out.zip" -- *)
-  mv "$tmp/out.zip" "$out"
+  (cd "$stage" && zip -q -0 -X "$tmp/out.zip" -- *) || {
+    printf '%s: zip failed\n' "$pdf" >&2; return 1; }
+  mv "$tmp/out.zip" "$out" || {
+    printf '%s: cannot write %s\n' "$pdf" "$out" >&2; return 1; }
   name=$(basename "$out")
 
   local ok=$((pages - fallback_count)) summary
   if [ "$fallback_count" -eq 0 ]; then
     summary="$name: $pages/$pages pages lossless"
   else
-    summary="$name: $ok/$pages pages lossless; rendered at $RENDER_DPI DPI: $fallback_list"
+    summary="$name: $ok/$pages pages lossless; rendered: $fallback_list"
     { printf '%s\n\n' "$summary"; cat "$tmp/reasons.txt"; } > "$out.log"
   fi
   printf '%s\n' "$summary"
@@ -731,12 +807,12 @@ Replace the `die "conversion not implemented yet"` line in `main` with:
   [ "$failures" -eq 0 ]
 ```
 
-Note `convert_pdf` runs in a command substitution (subshell), so its `return 1` cannot kill the whole run under `set -e` — per-file failure isolation comes free.
+Note `convert_pdf` is invoked as `if summary=$(convert_pdf ...); then` — the whole call sits inside a tested command substitution, and bash suppresses `errexit` for every command inside the function body as a result (not just the top-level call; this is a well-known bash gotcha, not a design choice). Per-file failure isolation *is* free — one file's failure can't abort the batch loop — but nothing inside `convert_pdf` can lean on `set -e` to stop a failed step partway through. Every side-effecting command in there (`mkdir`, `cp`, `sips`, `zip`, `mv`, ...) carries its own explicit `|| return 1` guard for exactly this reason.
 
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `18 passed, 0 failed`. If the byte-identity test fails, diff the actual extracted filenames (`ls` the ref dir) — the `img-PPP-NNN.ext` parse in `find_page_image` is the first suspect.
+Expected: `24 passed, 0 failed`. If the byte-identity test fails, diff the actual extracted filenames (`ls` the ref dir) — the `img-PPP-NNN.ext` parse in `find_page_image` is the first suspect.
 
 - [ ] **Step 5: Commit**
 
@@ -765,17 +841,17 @@ begin "e2e masked-page: summary reports the rendered page"
 assert_match "$OUT" "1/2 pages lossless"
 
 begin "e2e masked-page: summary names page 2"
-assert_match "$OUT" "rendered at 300 DPI: 2"
+assert_match "$OUT" "rendered: 2 (72 DPI)"
 
 begin "e2e masked-page: sidecar log written with reason"
 assert_file "$WORK/masked-page.cbz.log"
 LOG=$(cat "$WORK/masked-page.cbz.log")
-assert_match "$LOG" "page 2: mask"
+assert_match "$LOG" "page 2: mask — rendered at 72 DPI"
 
 begin "e2e masked-page: cbz still has 2 pages"
 mkdir -p "$WORK/gotmask"
 unzip -qo "$WORK/masked-page.cbz" -d "$WORK/gotmask"
-N=$(find "$WORK/gotmask" -type f | wc -l | tr -d ' ')
+N=$(find "$WORK/gotmask" -type f -size +0 | wc -l | tr -d ' ')
 assert_eq "$N" "2"
 
 begin "e2e multi-image-page: layered page falls back, other stays lossless"
@@ -796,20 +872,23 @@ Expected: new tests FAIL with `needs fallback rendering (not implemented yet)`.
 - [ ] **Step 3: Replace the `render_page` stub**
 
 ```bash
-# render_page pdf page tmp: render one page to $tmp/render-$page/ as JPEG.
+# render_page pdf page tmp [dpi]: render one page to $tmp/render-$page/ as
+# JPEG at the given DPI (defaults to RENDER_DPI when omitted).
 render_page() {
-  local pdf="$1" page="$2" tmp="$3"
-  mkdir -p "$tmp/render-$page"
-  pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$RENDER_DPI" \
-    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>/dev/null
-  [ -n "$(find "$tmp/render-$page" -type f | head -n 1)" ]
+  local pdf="$1" page="$2" tmp="$3" dpi="${4:-$RENDER_DPI}"
+  mkdir -p "$tmp/render-$page" || return 1
+  pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$dpi" \
+    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>"$tmp/render-$page.err"
+  [ -n "$(find "$tmp/render-$page" -type f -size +0 | head -n 1)" ]
 }
 ```
+
+`-size +0` on both the success check and the pickup keeps a 0-byte render (disk full, OOM-killed `pdftoppm`) from shipping as a corrupt page; the redirected stderr sidecar (`$tmp/render-$page.err`) lets `convert_pdf`'s failure branch surface the real `pdftoppm` error instead of a silent `2>/dev/null`. The `dpi` param (with its `RENDER_DPI` default) was added by the Task 13 smart-DPI amendment; `convert_pdf` passes the classifier's suggested per-page DPI as the 4th argument.
 
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `26 passed, 0 failed`.
+Expected: `32 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -865,7 +944,7 @@ if "$PDF2CBZ" --notify "$WORK/notify.pdf" >/dev/null 2>&1; then ok; else fail "n
 - [ ] **Step 2: Run tests**
 
 Run: `tests/run.sh`
-Expected: `34 passed, 0 failed` — this logic shipped in Task 5, so these should pass immediately. Any failure here is a real bug: fix `bin/pdf2cbz`, don't weaken the test.
+Expected: `40 passed, 0 failed` — this logic shipped in Task 5, so these should pass immediately. Any failure here is a real bug: fix `bin/pdf2cbz`, don't weaken the test.
 
 - [ ] **Step 3: Commit**
 
@@ -881,6 +960,7 @@ git commit -m "test: collisions, batch isolation, junk input, --notify"
 **Files:**
 - Create: `.github/workflows/ci.yml`
 - Modify: `bin/pdf2cbz`, `tests/*.sh` (whatever shellcheck flags)
+- Modify: `tests/e2e.test.sh` (render-failure-path test, from code review)
 
 - [ ] **Step 1: Run shellcheck locally**
 
@@ -894,7 +974,44 @@ Expected: warnings likely. Fix every finding (quote variables, etc.). Use target
 - [ ] **Step 2: Re-run tests after fixes**
 
 Run: `tests/run.sh`
-Expected: `34 passed, 0 failed`.
+Expected: `40 passed, 0 failed`.
+
+- [ ] **Step 2b: Pin the render-failure path (from code review)**
+
+Append to `tests/e2e.test.sh` a test that shims `pdftoppm` to simulate a
+truncated (0-byte) render and asserts `pdf2cbz` fails loudly with the
+captured `pdftoppm` stderr surfaced, and ships no `.cbz`:
+
+```bash
+begin "e2e render failure: 0-byte render fails loudly with captured stderr"
+mkdir -p "$WORK/shim"
+cat > "$WORK/shim/pdftoppm" <<'SHIM'
+#!/bin/bash
+# Parse the output prefix (last arg) and fake a truncated write.
+eval "prefix=\${$#}"
+: > "${prefix}-2.jpg"
+echo "SHIM: could not write image data (disk full)" >&2
+exit 0
+SHIM
+chmod +x "$WORK/shim/pdftoppm"
+mkdir -p "$WORK/renderfail"
+cp fixtures/masked-page.pdf "$WORK/renderfail/"
+OUT=$(PATH="$WORK/shim:$PATH" "$PDF2CBZ" "$WORK/renderfail/masked-page.pdf" 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ]; then ok; else fail "expected nonzero exit"; fi
+begin "e2e render failure: captured stderr surfaced"
+assert_match "$OUT" "SHIM: could not write image data"
+begin "e2e render failure: no cbz shipped"
+assert_absent "$WORK/renderfail/masked-page.cbz"
+```
+
+The shim relies on `render_page` invoking `pdftoppm` with the output prefix
+as its last argument (confirmed in Task 6's `render_page`); `masked-page.pdf`
+page 2 is the one page that goes through fallback rendering, so the
+hardcoded `-2.jpg` suffix matches.
+
+Run: `tests/run.sh`
+Expected: `43 passed, 0 failed`.
 
 - [ ] **Step 3: Create `.github/workflows/ci.yml`**
 
@@ -912,11 +1029,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: brew install poppler shellcheck
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
       - name: Lint
         run: shellcheck bin/pdf2cbz tests/run.sh tests/*.test.sh
       - name: Test
         run: tests/run.sh
 ```
+
+> **2026-08-05 amendment (Task 13):** `HOMEBREW_NO_AUTO_UPDATE: 1` was added
+> to the install step per code review — it speeds up CI and avoids
+> transient `brew update` breakage.
 
 The macOS runner is load-bearing: tests use `sips` and target the system bash.
 
@@ -924,7 +1047,7 @@ The macOS runner is load-bearing: tests use `sips` and target the system bash.
 
 ```bash
 git add .github/workflows/ci.yml bin/pdf2cbz tests
-git commit -m "ci: shellcheck + test suite on macos-latest"
+git commit -m "ci: shellcheck + test suite on macos-latest; pin render-failure path"
 ```
 
 ---
@@ -975,13 +1098,26 @@ Automator bundles are just directories of plists — these are hand-authored, th
 The embedded shell script (input passed as arguments, `/bin/zsh`):
 
 ```zsh
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
 done
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or put pdf2cbz on PATH" with title "comicdown"'
+if command -v pdf2cbz >/dev/null; then
+  exec pdf2cbz --notify "$@"
+fi
+osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'
 ```
+
+> **2026-08-05 amendment (code review):** Automator services run `/bin/zsh`
+> under launchd's minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`). The
+> absolute-path probing above finds `pdf2cbz` fine, but `pdf2cbz`'s own
+> `check_deps` shells out to `command -v pdfinfo/pdfimages/pdftoppm`, which
+> is PATH-based — so every Quick Action run dead-ended with a misleading
+> "install poppler" notification even when poppler was installed. The fix
+> exports a PATH that includes the Homebrew/local bin dirs before probing,
+> and adds a `command -v pdf2cbz` fallback for PATH-only installs.
 
 Full `quick-action/PDF to CBZ.workflow/Contents/document.wflow` (the script above lives in `COMMAND_STRING`; it contains no XML-special characters, so it embeds verbatim — keep it that way, or entity-escape `& < >` if it ever changes):
 
@@ -1043,12 +1179,16 @@ Full `quick-action/PDF to CBZ.workflow/Contents/document.wflow` (the script abov
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string>for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
+					<string>export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
 done
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or put pdf2cbz on PATH" with title "comicdown"'</string>
+if command -v pdf2cbz >/dev/null; then
+  exec pdf2cbz --notify "$@"
+fi
+osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>
@@ -1140,8 +1280,9 @@ PDF structure. Converters that "print" pages re-encode that JPEG and smear
 detail. comicdown instead copies the embedded images out **byte-for-byte**
 (via poppler's `pdfimages`) and zips them into a CBZ. Pages that can't come
 out losslessly (soft masks, layered images, fax encodings, vector pages) are
-rendered at 300 DPI instead — and clearly reported, so you always know
-exactly what you got.
+rendered at the page's own inherent pixel density (72–600 DPI, from the
+source images' effective ppi; 300 for pure vector pages) — and clearly
+reported, so you always know exactly what you got.
 
 For personal archives and DRM-free comics you already own.
 
@@ -1168,7 +1309,7 @@ overwritten — you get ` (1).cbz`). Typical output:
 
 ```
 Some Comic.cbz: 24/24 pages lossless
-Another.cbz: 22/24 pages lossless; rendered at 300 DPI: 3, 17
+Another.cbz: 22/24 pages lossless; rendered: 3 (96 DPI), 17 (300 DPI)
 ```
 
 When any page needed rendering, a `.cbz.log` sidecar records which pages and
@@ -1329,3 +1470,87 @@ git push
 ```
 
 README already notes the Shortcut is a regenerated artifact of the workflow script.
+
+---
+
+### Task 13: Smart-DPI fallback (spec amendment 2026-08-05)
+
+**Files:**
+- Modify: `bin/pdf2cbz` (classify_pages, convert_pdf, render_page)
+- Modify: `tests/classifier.test.sh`, `tests/e2e.test.sh` (updated expectations + 2 new clamp tests)
+
+Fallback pages render at the page's inherent pixel density (max x-ppi/y-ppi
+of its raster images, columns $13/$14 of `pdfimages -list`, clamped 72–600)
+instead of blind 300 DPI. Pages with no raster images use the 300 default.
+Classifier output gains a 4th field: `<page> <status> <reason> <dpi|->`.
+
+- [ ] **Step 1: Update classifier test expectations and add clamp tests**
+
+Every `classify_pages` expectation in `tests/classifier.test.sh` gains a 4th
+field. The synthetic rows all carry `300   300` ppi columns, so:
+- lossless rows: `1 lossless - 300`
+- fallback rows keep their reason and gain the dpi: e.g. `1 fallback mask 300`
+- the no-image page: `1 fallback no-image -`
+
+Append two new tests (same style, rows differing only in the ppi columns):
+
+```bash
+begin "classifier: low ppi clamps to 72"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0    12     7  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 72"
+
+begin "classifier: high ppi clamps to 600"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   900   880  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 600"
+```
+
+- [ ] **Step 2: Update e2e expectations for the new summary/log format**
+
+Summary line for books with fallback changes from
+`...; rendered at 300 DPI: 2` to `...; rendered: 2 (72 DPI)` (the fixture
+images are ~12 ppi → clamped to 72). Log lines become
+`page 2: mask — rendered at 72 DPI`. Update in `tests/e2e.test.sh`:
+- masked-page "summary names page 2": expect `rendered: 2 (72 DPI)`
+- masked-page log test: expect `page 2: mask` (unchanged substring) — plus
+  change the follow-up match to `rendered at 72 DPI`
+- multi-image log test: `page 2: multi-image` (unchanged)
+
+- [ ] **Step 3: Run tests — expect the updated classifier/e2e tests to FAIL** (old format still emitted).
+
+- [ ] **Step 4: Implement**
+
+In `classify_pages` awk, per image row also track density:
+
+```awk
+      xp = $13 + 0; yp = $14 + 0
+      m = (xp > yp) ? xp : yp
+      if (m > ppi[page]) ppi[page] = m
+```
+
+END block: compute `d` per page — if `ppi[p]` unset/zero print `-`, else
+clamp: `if (d < 72) d = 72; if (d > 600) d = 600` — and append as the 4th
+output field on every line.
+
+In `convert_pdf`: `read -r page status reason dpi`; in the fallback branch:
+
+```bash
+      rdpi="$RENDER_DPI"
+      if [ "$dpi" != "-" ]; then rdpi="$dpi"; fi
+```
+
+pass `"$rdpi"` as a 4th arg to `render_page`; accumulate
+`fallback_list="${fallback_list:+$fallback_list, }$page ($rdpi DPI)"`;
+reasons line: `printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$rdpi"`.
+Summary else-branch becomes:
+`summary="$name: $ok/$pages pages lossless; rendered: $fallback_list"`.
+
+In `render_page`: accept `local dpi="${4:-$RENDER_DPI}"` and use `-r "$dpi"`.
+
+- [ ] **Step 5: Run tests — all pass (count unchanged from before this task: the two new clamp tests offset nothing; expect prior_total + 2).**
+
+- [ ] **Step 6: Sync the plan's earlier Task 4/5/6 code blocks and test expectations to the new 4-field/new-summary reality, and commit**
+
+```bash
+git add bin/pdf2cbz tests docs
+git commit -m "feat: render fallback pages at inherent page DPI (72-600 clamp)"
+```

@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install poppler shellcheck
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+      - name: Lint
+        run: shellcheck bin/pdf2cbz tests/run.sh tests/*.test.sh
+      - name: Test
+        run: tests/run.sh

@@ -1,0 +1,3 @@
+.DS_Store
+# Large local-only sample PDFs for manual testing (personal copies, never distributed)
+tests/samples/

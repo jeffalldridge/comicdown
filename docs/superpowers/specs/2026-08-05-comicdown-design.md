@@ -110,6 +110,20 @@ page classifier synthetic `pdfimages -list` output (hand-crafting valid fax
 streams for fixtures isn't worth the complexity; the fallback path they
 trigger is identical to the mask/multi-image fixtures).
 
+## Amendment (2026-08-05, approved): smart-DPI fallback
+
+Fallback pages render at the page's **inherent pixel density** instead of a
+blind 300 DPI. `pdfimages -list` reports per-image `x-ppi`/`y-ppi` — the
+effective density of each image as placed on the page. The classifier's
+output gains a fourth field: the page's suggested render DPI = max ppi over
+its raster images, clamped to 72–600; `-` when the page has no raster images
+(vector/text), in which case the 300 DPI default applies. This renders each
+page pixel-exact: low-res source art isn't upscaled past its own resolution,
+and high-res scans aren't degraded to 300.
+
+Summary wording becomes `rendered: 2 (72 DPI), 5 (300 DPI)`; sidecar log
+lines carry the actual DPI used per page.
+
 ## Open-source readiness
 
 The repo lives publicly on GitHub (`jeffalldridge/comicdown`, created with

@@ -1,0 +1,26 @@
+name: PDF converts wrong
+description: A PDF produced a broken, incomplete, or unexpectedly non-lossless CBZ
+labels: [bug, pdf-sample]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did pdf2cbz report, and what does the CBZ actually look like?
+    validations:
+      required: true
+  - type: textarea
+    id: pdfimages-list
+    attributes:
+      label: Output of `pdfimages -list yourfile.pdf`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample file
+      description: >-
+        If the PDF is shareable (DRM-free, no copyright concerns), attach it
+        or a single problem page (`pdfseparate -f N -l N file.pdf page.pdf`).
+        Samples become test fixtures.
