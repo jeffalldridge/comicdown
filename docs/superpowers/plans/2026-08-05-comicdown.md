@@ -1280,8 +1280,9 @@ PDF structure. Converters that "print" pages re-encode that JPEG and smear
 detail. comicdown instead copies the embedded images out **byte-for-byte**
 (via poppler's `pdfimages`) and zips them into a CBZ. Pages that can't come
 out losslessly (soft masks, layered images, fax encodings, vector pages) are
-rendered at 300 DPI instead — and clearly reported, so you always know
-exactly what you got.
+rendered at the page's own inherent pixel density (72–600 DPI, from the
+source images' effective ppi; 300 for pure vector pages) — and clearly
+reported, so you always know exactly what you got.
 
 For personal archives and DRM-free comics you already own.
 
@@ -1308,7 +1309,7 @@ overwritten — you get ` (1).cbz`). Typical output:
 
 ```
 Some Comic.cbz: 24/24 pages lossless
-Another.cbz: 22/24 pages lossless; rendered at 300 DPI: 3, 17
+Another.cbz: 22/24 pages lossless; rendered: 3 (96 DPI), 17 (300 DPI)
 ```
 
 When any page needed rendering, a `.cbz.log` sidecar records which pages and
