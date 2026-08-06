@@ -44,6 +44,35 @@ check_deps() {
   fi
 }
 
+# classify_pages: stdin = `pdfimages -list` output, $1 = page count.
+# Prints one line per page: "<page> lossless -" or "<page> fallback <reason>".
+# Lossless requires exactly one real raster image, encoded as jpeg (DCT) or
+# image (flate), in a non-CMYK colorspace, with no masks/stencils on the page.
+classify_pages() {
+  awk -v pages="$1" '
+    NR <= 2 { next }          # header + separator
+    NF < 9 { next }
+    {
+      page = $1; type = $3; color = $6; enc = $9
+      if (type == "image") {
+        count[page]++
+        if (count[page] > 1 && !(page in reason)) reason[page] = "multi-image"
+        if (enc != "jpeg" && enc != "image" && !(page in reason)) reason[page] = "enc:" enc
+        if (color == "cmyk" && !(page in reason)) reason[page] = "cmyk"
+      } else if (!(page in reason)) {
+        reason[page] = "mask"   # smask/stencil rows need compositing
+      }
+    }
+    END {
+      for (p = 1; p <= pages; p++) {
+        if (p in reason)          print p, "fallback", reason[p]
+        else if (count[p] == 1)   print p, "lossless", "-"
+        else if (count[p] == "")  print p, "fallback", "no-image"
+        else                      print p, "fallback", "multi-image"
+      }
+    }'
+}
+
 main() {
   local files_count=0
   FILES=()
