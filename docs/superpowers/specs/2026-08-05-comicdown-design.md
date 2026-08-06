@@ -40,7 +40,12 @@ comicdown/
 ├── tests/
 │   ├── fixtures/                      # tiny committed sample PDFs
 │   └── run.sh                         # asserts lossless identity + fallback behavior
+├── .github/
+│   ├── workflows/ci.yml               # shellcheck + tests on macos-latest
+│   └── ISSUE_TEMPLATE/                # "PDF converts wrong" + general
 ├── docs/superpowers/specs/
+├── CONTRIBUTING.md
+├── LICENSE                            # MIT
 └── README.md
 ```
 
@@ -98,6 +103,32 @@ temp dirs cleaned up on every exit path (trap).
 - **masked-page.pdf** — image + smask on one page → that page falls back,
   others stay lossless, log written.
 - **ccitt-scan.pdf** — fax-encoded page → fallback render triggers.
+
+## Open-source readiness
+
+The repo lives publicly on GitHub (`jeffalldridge/comicdown`, created with
+`gh repo create --public` or the GitHub API) and follows small-tool best
+practices from day one:
+
+- **LICENSE** — MIT: permissive, the norm for CLI utilities, zero friction
+  for contributors.
+- **README** — the storefront: what it does and why lossless matters (with a
+  before/after explanation), install steps (`brew install poppler`, clone,
+  double-click the Quick Action), CLI usage, how fallback reporting works,
+  and a contributing pointer.
+- **CONTRIBUTING.md** — how to run tests, shell style expectations
+  (shellcheck-clean), and how to add a fixture when reporting a PDF that
+  converts badly. Bug reports that attach a problem PDF are the most valuable
+  contribution, and the docs say so.
+- **CI (GitHub Actions)** — a `macos-latest` workflow on every push/PR:
+  `brew install poppler`, `shellcheck bin/pdf2cbz`, then `tests/run.sh`.
+  Tests require macOS built-ins (`sips`), so the macOS runner is load-bearing,
+  not decorative.
+- **Issue templates** — two lightweight forms: "PDF converts wrong" (asks for
+  the `pdfimages -list` output and ideally the file) and a general
+  bug/feature template.
+- **Releases** — tagged versions with GitHub Releases once v1 lands; a
+  Homebrew tap is a roadmap item alongside the enhancement pass.
 
 ## Future roadmap (designed-for, not built)
 
