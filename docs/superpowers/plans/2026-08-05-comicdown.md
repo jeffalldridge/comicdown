@@ -1098,13 +1098,26 @@ Automator bundles are just directories of plists — these are hand-authored, th
 The embedded shell script (input passed as arguments, `/bin/zsh`):
 
 ```zsh
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
 done
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or put pdf2cbz on PATH" with title "comicdown"'
+if command -v pdf2cbz >/dev/null; then
+  exec pdf2cbz --notify "$@"
+fi
+osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'
 ```
+
+> **2026-08-05 amendment (code review):** Automator services run `/bin/zsh`
+> under launchd's minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`). The
+> absolute-path probing above finds `pdf2cbz` fine, but `pdf2cbz`'s own
+> `check_deps` shells out to `command -v pdfinfo/pdfimages/pdftoppm`, which
+> is PATH-based — so every Quick Action run dead-ended with a misleading
+> "install poppler" notification even when poppler was installed. The fix
+> exports a PATH that includes the Homebrew/local bin dirs before probing,
+> and adds a `command -v pdf2cbz` fallback for PATH-only installs.
 
 Full `quick-action/PDF to CBZ.workflow/Contents/document.wflow` (the script above lives in `COMMAND_STRING`; it contains no XML-special characters, so it embeds verbatim — keep it that way, or entity-escape `& < >` if it ever changes):
 
@@ -1166,12 +1179,16 @@ Full `quick-action/PDF to CBZ.workflow/Contents/document.wflow` (the script abov
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string>for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
+					<string>export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
 done
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or put pdf2cbz on PATH" with title "comicdown"'</string>
+if command -v pdf2cbz >/dev/null; then
+  exec pdf2cbz --notify "$@"
+fi
+osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>

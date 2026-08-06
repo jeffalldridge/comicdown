@@ -55,12 +55,16 @@
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string>for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
+					<string>export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
 done
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or put pdf2cbz on PATH" with title "comicdown"'</string>
+if command -v pdf2cbz >/dev/null; then
+  exec pdf2cbz --notify "$@"
+fi
+osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>
