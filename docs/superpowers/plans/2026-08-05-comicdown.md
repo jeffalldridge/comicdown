@@ -1417,3 +1417,87 @@ git push
 ```
 
 README already notes the Shortcut is a regenerated artifact of the workflow script.
+
+---
+
+### Task 13: Smart-DPI fallback (spec amendment 2026-08-05)
+
+**Files:**
+- Modify: `bin/pdf2cbz` (classify_pages, convert_pdf, render_page)
+- Modify: `tests/classifier.test.sh`, `tests/e2e.test.sh` (updated expectations + 2 new clamp tests)
+
+Fallback pages render at the page's inherent pixel density (max x-ppi/y-ppi
+of its raster images, columns $13/$14 of `pdfimages -list`, clamped 72–600)
+instead of blind 300 DPI. Pages with no raster images use the 300 default.
+Classifier output gains a 4th field: `<page> <status> <reason> <dpi|->`.
+
+- [ ] **Step 1: Update classifier test expectations and add clamp tests**
+
+Every `classify_pages` expectation in `tests/classifier.test.sh` gains a 4th
+field. The synthetic rows all carry `300   300` ppi columns, so:
+- lossless rows: `1 lossless - 300`
+- fallback rows keep their reason and gain the dpi: e.g. `1 fallback mask 300`
+- the no-image page: `1 fallback no-image -`
+
+Append two new tests (same style, rows differing only in the ppi columns):
+
+```bash
+begin "classifier: low ppi clamps to 72"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0    12     7  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 72"
+
+begin "classifier: high ppi clamps to 600"
+OUT=$(printf '%s\n   1     0 image     100   150  rgb     3   8  jpeg   no        10  0   900   880  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless - 600"
+```
+
+- [ ] **Step 2: Update e2e expectations for the new summary/log format**
+
+Summary line for books with fallback changes from
+`...; rendered at 300 DPI: 2` to `...; rendered: 2 (72 DPI)` (the fixture
+images are ~12 ppi → clamped to 72). Log lines become
+`page 2: mask — rendered at 72 DPI`. Update in `tests/e2e.test.sh`:
+- masked-page "summary names page 2": expect `rendered: 2 (72 DPI)`
+- masked-page log test: expect `page 2: mask` (unchanged substring) — plus
+  change the follow-up match to `rendered at 72 DPI`
+- multi-image log test: `page 2: multi-image` (unchanged)
+
+- [ ] **Step 3: Run tests — expect the updated classifier/e2e tests to FAIL** (old format still emitted).
+
+- [ ] **Step 4: Implement**
+
+In `classify_pages` awk, per image row also track density:
+
+```awk
+      xp = $13 + 0; yp = $14 + 0
+      m = (xp > yp) ? xp : yp
+      if (m > ppi[page]) ppi[page] = m
+```
+
+END block: compute `d` per page — if `ppi[p]` unset/zero print `-`, else
+clamp: `if (d < 72) d = 72; if (d > 600) d = 600` — and append as the 4th
+output field on every line.
+
+In `convert_pdf`: `read -r page status reason dpi`; in the fallback branch:
+
+```bash
+      rdpi="$RENDER_DPI"
+      if [ "$dpi" != "-" ]; then rdpi="$dpi"; fi
+```
+
+pass `"$rdpi"` as a 4th arg to `render_page`; accumulate
+`fallback_list="${fallback_list:+$fallback_list, }$page ($rdpi DPI)"`;
+reasons line: `printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$rdpi"`.
+Summary else-branch becomes:
+`summary="$name: $ok/$pages pages lossless; rendered: $fallback_list"`.
+
+In `render_page`: accept `local dpi="${4:-$RENDER_DPI}"` and use `-r "$dpi"`.
+
+- [ ] **Step 5: Run tests — all pass (count unchanged from before this task: the two new clamp tests offset nothing; expect prior_total + 2).**
+
+- [ ] **Step 6: Sync the plan's earlier Task 4/5/6 code blocks and test expectations to the new 4-field/new-summary reality, and commit**
+
+```bash
+git add bin/pdf2cbz tests docs
+git commit -m "feat: render fallback pages at inherent page DPI (72-600 clamp)"
+```
