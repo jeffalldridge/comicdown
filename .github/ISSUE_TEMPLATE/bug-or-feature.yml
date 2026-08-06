@@ -1,0 +1,10 @@
+name: Bug report or feature request
+description: Anything that isn't a specific PDF converting wrong
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What's up
+      description: Describe the bug (with steps to reproduce) or the feature you'd like.
+    validations:
+      required: true
