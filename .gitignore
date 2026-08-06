@@ -1,2 +1,3 @@
 .DS_Store
-spec/
+# Large local-only sample PDFs for manual testing (personal copies, never distributed)
+tests/samples/
