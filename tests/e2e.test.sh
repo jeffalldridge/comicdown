@@ -122,3 +122,24 @@ assert_absent "$WORK/junk.cbz"
 begin "e2e notify: --notify flag is accepted"
 cp fixtures/jpeg-book.pdf "$WORK/notify.pdf"
 if "$PDF2CBZ" --notify "$WORK/notify.pdf" >/dev/null 2>&1; then ok; else fail "nonzero exit"; fi
+
+begin "e2e render failure: 0-byte render fails loudly with captured stderr"
+mkdir -p "$WORK/shim"
+cat > "$WORK/shim/pdftoppm" <<'SHIM'
+#!/bin/bash
+# Parse the output prefix (last arg) and fake a truncated write.
+eval "prefix=\${$#}"
+: > "${prefix}-2.jpg"
+echo "SHIM: could not write image data (disk full)" >&2
+exit 0
+SHIM
+chmod +x "$WORK/shim/pdftoppm"
+mkdir -p "$WORK/renderfail"
+cp fixtures/masked-page.pdf "$WORK/renderfail/"
+OUT=$(PATH="$WORK/shim:$PATH" "$PDF2CBZ" "$WORK/renderfail/masked-page.pdf" 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ]; then ok; else fail "expected nonzero exit"; fi
+begin "e2e render failure: captured stderr surfaced"
+assert_match "$OUT" "SHIM: could not write image data"
+begin "e2e render failure: no cbz shipped"
+assert_absent "$WORK/renderfail/masked-page.cbz"

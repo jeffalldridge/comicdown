@@ -931,6 +931,7 @@ git commit -m "test: collisions, batch isolation, junk input, --notify"
 **Files:**
 - Create: `.github/workflows/ci.yml`
 - Modify: `bin/pdf2cbz`, `tests/*.sh` (whatever shellcheck flags)
+- Modify: `tests/e2e.test.sh` (render-failure-path test, from code review)
 
 - [ ] **Step 1: Run shellcheck locally**
 
@@ -945,6 +946,43 @@ Expected: warnings likely. Fix every finding (quote variables, etc.). Use target
 
 Run: `tests/run.sh`
 Expected: `40 passed, 0 failed`.
+
+- [ ] **Step 2b: Pin the render-failure path (from code review)**
+
+Append to `tests/e2e.test.sh` a test that shims `pdftoppm` to simulate a
+truncated (0-byte) render and asserts `pdf2cbz` fails loudly with the
+captured `pdftoppm` stderr surfaced, and ships no `.cbz`:
+
+```bash
+begin "e2e render failure: 0-byte render fails loudly with captured stderr"
+mkdir -p "$WORK/shim"
+cat > "$WORK/shim/pdftoppm" <<'SHIM'
+#!/bin/bash
+# Parse the output prefix (last arg) and fake a truncated write.
+eval "prefix=\${$#}"
+: > "${prefix}-2.jpg"
+echo "SHIM: could not write image data (disk full)" >&2
+exit 0
+SHIM
+chmod +x "$WORK/shim/pdftoppm"
+mkdir -p "$WORK/renderfail"
+cp fixtures/masked-page.pdf "$WORK/renderfail/"
+OUT=$(PATH="$WORK/shim:$PATH" "$PDF2CBZ" "$WORK/renderfail/masked-page.pdf" 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ]; then ok; else fail "expected nonzero exit"; fi
+begin "e2e render failure: captured stderr surfaced"
+assert_match "$OUT" "SHIM: could not write image data"
+begin "e2e render failure: no cbz shipped"
+assert_absent "$WORK/renderfail/masked-page.cbz"
+```
+
+The shim relies on `render_page` invoking `pdftoppm` with the output prefix
+as its last argument (confirmed in Task 6's `render_page`); `masked-page.pdf`
+page 2 is the one page that goes through fallback rendering, so the
+hardcoded `-2.jpg` suffix matches.
+
+Run: `tests/run.sh`
+Expected: `43 passed, 0 failed`.
 
 - [ ] **Step 3: Create `.github/workflows/ci.yml`**
 
@@ -974,7 +1012,7 @@ The macOS runner is load-bearing: tests use `sips` and target the system bash.
 
 ```bash
 git add .github/workflows/ci.yml bin/pdf2cbz tests
-git commit -m "ci: shellcheck + test suite on macos-latest"
+git commit -m "ci: shellcheck + test suite on macos-latest; pin render-failure path"
 ```
 
 ---

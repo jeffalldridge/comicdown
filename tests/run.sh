@@ -3,6 +3,7 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 ROOT=$(cd .. && pwd)
+# shellcheck disable=SC2034  # used by tests/*.test.sh, sourced dynamically below
 PDF2CBZ="$ROOT/bin/pdf2cbz"
 PASS=0 FAIL=0 CURRENT=""
 

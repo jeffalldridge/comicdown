@@ -208,7 +208,7 @@ main() {
       --version) printf 'pdf2cbz %s\n' "$VERSION"; exit 0 ;;
       -h|--help) usage; exit 0 ;;
       -*) die "unknown option: $1 (see --help)" ;;
-      *) FILES[$files_count]="$1"; files_count=$((files_count + 1)) ;;
+      *) FILES[files_count]="$1"; files_count=$((files_count + 1)) ;;
     esac
     shift
   done
