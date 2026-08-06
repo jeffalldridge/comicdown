@@ -38,3 +38,24 @@ mkdir -p "$WORK/gotpng"
 unzip -qo "$WORK/png-book.cbz" -d "$WORK/gotpng"
 N=$(find "$WORK/gotpng" -name '*.png' | wc -l | tr -d ' ')
 assert_eq "$N" "2"
+
+begin "e2e gnarly filename: spaces, apostrophe, parens"
+cp fixtures/jpeg-book.pdf "$WORK/My Comic's Vol. 2 (2019).pdf"
+OUT=$("$PDF2CBZ" "$WORK/My Comic's Vol. 2 (2019).pdf" 2>&1)
+assert_file "$WORK/My Comic's Vol. 2 (2019).cbz"
+assert_match "$OUT" "3/3 pages lossless"
+
+begin "e2e read-only dir: fails loudly, no false success"
+mkdir "$WORK/ro"
+cp fixtures/jpeg-book.pdf "$WORK/ro/"
+chmod 555 "$WORK/ro"
+if OUT=$("$PDF2CBZ" "$WORK/ro/jpeg-book.pdf" 2>&1); then
+  fail "expected nonzero exit"
+else
+  ok
+fi
+chmod 755 "$WORK/ro"
+case "$OUT" in
+  *"pages lossless"*) fail "output falsely claims success: $OUT" ;;
+  *) ok ;;
+esac
