@@ -488,12 +488,20 @@ begin "classifier: page with no raster image falls back (vector/text page)"
 OUT=$(printf '%s\n   2     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 2)
 assert_eq "$OUT" "1 fallback no-image
 2 lossless -"
+
+begin "classifier: icc 4-component jpeg forces fallback"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     4   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 fallback cmyk"
+
+begin "classifier: icc 3-component jpeg is lossless"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless -"
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `tests/run.sh`
-Expected: the 8 classifier tests FAIL (`classify_pages: command not found` surfaces as empty output mismatches); cli tests still pass.
+Expected: the 10 classifier tests FAIL (`classify_pages: command not found` surfaces as empty output mismatches); cli tests still pass.
 
 - [ ] **Step 3: Implement `classify_pages` in `bin/pdf2cbz`** (insert after `check_deps`)
 
@@ -507,12 +515,12 @@ classify_pages() {
     NR <= 2 { next }          # header + separator
     NF < 9 { next }
     {
-      page = $1; type = $3; color = $6; enc = $9
+      page = $1; type = $3; color = $6; comp = $7; enc = $9
       if (type == "image") {
         count[page]++
         if (count[page] > 1 && !(page in reason)) reason[page] = "multi-image"
         if (enc != "jpeg" && enc != "image" && !(page in reason)) reason[page] = "enc:" enc
-        if (color == "cmyk" && !(page in reason)) reason[page] = "cmyk"
+        if ((color == "cmyk" || comp == 4) && !(page in reason)) reason[page] = "cmyk"
       } else if (!(page in reason)) {
         reason[page] = "mask"   # smask/stencil rows need compositing
       }
@@ -531,7 +539,7 @@ classify_pages() {
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `12 passed, 0 failed`.
+Expected: `14 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -736,7 +744,7 @@ Note `convert_pdf` runs in a command substitution (subshell), so its `return 1` 
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `18 passed, 0 failed`. If the byte-identity test fails, diff the actual extracted filenames (`ls` the ref dir) — the `img-PPP-NNN.ext` parse in `find_page_image` is the first suspect.
+Expected: `20 passed, 0 failed`. If the byte-identity test fails, diff the actual extracted filenames (`ls` the ref dir) — the `img-PPP-NNN.ext` parse in `find_page_image` is the first suspect.
 
 - [ ] **Step 5: Commit**
 
@@ -809,7 +817,7 @@ render_page() {
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `tests/run.sh`
-Expected: `26 passed, 0 failed`.
+Expected: `28 passed, 0 failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -865,7 +873,7 @@ if "$PDF2CBZ" --notify "$WORK/notify.pdf" >/dev/null 2>&1; then ok; else fail "n
 - [ ] **Step 2: Run tests**
 
 Run: `tests/run.sh`
-Expected: `34 passed, 0 failed` — this logic shipped in Task 5, so these should pass immediately. Any failure here is a real bug: fix `bin/pdf2cbz`, don't weaken the test.
+Expected: `36 passed, 0 failed` — this logic shipped in Task 5, so these should pass immediately. Any failure here is a real bug: fix `bin/pdf2cbz`, don't weaken the test.
 
 - [ ] **Step 3: Commit**
 
@@ -894,7 +902,7 @@ Expected: warnings likely. Fix every finding (quote variables, etc.). Use target
 - [ ] **Step 2: Re-run tests after fixes**
 
 Run: `tests/run.sh`
-Expected: `34 passed, 0 failed`.
+Expected: `36 passed, 0 failed`.
 
 - [ ] **Step 3: Create `.github/workflows/ci.yml`**
 

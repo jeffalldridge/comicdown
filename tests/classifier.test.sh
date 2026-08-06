@@ -39,3 +39,11 @@ begin "classifier: page with no raster image falls back (vector/text page)"
 OUT=$(printf '%s\n   2     0 image     100   150  rgb     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 2)
 assert_eq "$OUT" "1 fallback no-image
 2 lossless -"
+
+begin "classifier: icc 4-component jpeg forces fallback"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     4   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 fallback cmyk"
+
+begin "classifier: icc 3-component jpeg is lossless"
+OUT=$(printf '%s\n   1     0 image     100   150  icc     3   8  jpeg   no        10  0   300   300  15K 9.6%%\n' "$HEADER" | classify_pages 1)
+assert_eq "$OUT" "1 lossless -"

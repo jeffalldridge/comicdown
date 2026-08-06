@@ -53,12 +53,12 @@ classify_pages() {
     NR <= 2 { next }          # header + separator
     NF < 9 { next }
     {
-      page = $1; type = $3; color = $6; enc = $9
+      page = $1; type = $3; color = $6; comp = $7; enc = $9
       if (type == "image") {
         count[page]++
         if (count[page] > 1 && !(page in reason)) reason[page] = "multi-image"
         if (enc != "jpeg" && enc != "image" && !(page in reason)) reason[page] = "enc:" enc
-        if (color == "cmyk" && !(page in reason)) reason[page] = "cmyk"
+        if ((color == "cmyk" || comp == 4) && !(page in reason)) reason[page] = "cmyk"
       } else if (!(page in reason)) {
         reason[page] = "mask"   # smask/stencil rows need compositing
       }
