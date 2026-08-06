@@ -79,7 +79,7 @@ assert_match "$LOG" "page 2: mask"
 begin "e2e masked-page: cbz still has 2 pages"
 mkdir -p "$WORK/gotmask"
 unzip -qo "$WORK/masked-page.cbz" -d "$WORK/gotmask"
-N=$(find "$WORK/gotmask" -type f | wc -l | tr -d ' ')
+N=$(find "$WORK/gotmask" -type f -size +0 | wc -l | tr -d ' ')
 assert_eq "$N" "2"
 
 begin "e2e multi-image-page: layered page falls back, other stays lossless"
@@ -90,3 +90,35 @@ assert_match "$OUT" "1/2 pages lossless"
 begin "e2e multi-image-page: log says multi-image"
 LOG=$(cat "$WORK/multi-image-page.cbz.log")
 assert_match "$LOG" "page 2: multi-image"
+
+begin "e2e collision: second run writes ' (1).cbz'"
+"$PDF2CBZ" "$WORK/jpeg-book.pdf" >/dev/null 2>&1
+assert_file "$WORK/jpeg-book (1).cbz"
+
+begin "e2e batch: two files in one call"
+mkdir -p "$WORK/batch"
+cp fixtures/jpeg-book.pdf fixtures/png-book.pdf "$WORK/batch/"
+OUT=$("$PDF2CBZ" "$WORK/batch/jpeg-book.pdf" "$WORK/batch/png-book.pdf" 2>&1)
+assert_file "$WORK/batch/jpeg-book.cbz"
+assert_file "$WORK/batch/png-book.cbz"
+
+begin "e2e batch: missing file fails but doesn't sink the batch"
+mkdir -p "$WORK/batch2"
+cp fixtures/jpeg-book.pdf "$WORK/batch2/"
+if "$PDF2CBZ" "$WORK/nope.pdf" "$WORK/batch2/jpeg-book.pdf" >/dev/null 2>&1; then
+  fail "expected nonzero exit"
+else
+  ok
+fi
+begin "e2e batch: the good file still converted"
+assert_file "$WORK/batch2/jpeg-book.cbz"
+
+begin "e2e bad input: non-PDF is rejected cleanly"
+printf 'not a pdf' > "$WORK/junk.pdf"
+if "$PDF2CBZ" "$WORK/junk.pdf" >/dev/null 2>&1; then fail "expected nonzero exit"; else ok; fi
+begin "e2e bad input: no cbz produced for junk"
+assert_absent "$WORK/junk.cbz"
+
+begin "e2e notify: --notify flag is accepted"
+cp fixtures/jpeg-book.pdf "$WORK/notify.pdf"
+if "$PDF2CBZ" --notify "$WORK/notify.pdf" >/dev/null 2>&1; then ok; else fail "nonzero exit"; fi

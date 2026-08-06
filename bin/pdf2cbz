@@ -147,8 +147,10 @@ convert_pdf() {
     fi
     if [ -z "$src" ]; then
       render_page "$pdf" "$page" "$tmp" || {
-        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2; return 1; }
-      src=$(find "$tmp/render-$page" -type f | head -n 1)
+        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2
+        if [ -s "$tmp/render-$page.err" ]; then cat "$tmp/render-$page.err" >&2; fi
+        return 1; }
+      src=$(find "$tmp/render-$page" -type f -size +0 | head -n 1)
       fallback_list="${fallback_list:+$fallback_list, }$page"
       fallback_count=$((fallback_count + 1))
       printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$RENDER_DPI" >> "$tmp/reasons.txt"
@@ -193,8 +195,8 @@ render_page() {
   local pdf="$1" page="$2" tmp="$3"
   mkdir -p "$tmp/render-$page" || return 1
   pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$RENDER_DPI" \
-    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>/dev/null
-  [ -n "$(find "$tmp/render-$page" -type f | head -n 1)" ]
+    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>"$tmp/render-$page.err"
+  [ -n "$(find "$tmp/render-$page" -type f -size +0 | head -n 1)" ]
 }
 
 main() {

@@ -706,8 +706,10 @@ convert_pdf() {
     fi
     if [ -z "$src" ]; then
       render_page "$pdf" "$page" "$tmp" || {
-        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2; return 1; }
-      src=$(find "$tmp/render-$page" -type f | head -n 1)
+        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2
+        if [ -s "$tmp/render-$page.err" ]; then cat "$tmp/render-$page.err" >&2; fi
+        return 1; }
+      src=$(find "$tmp/render-$page" -type f -size +0 | head -n 1)
       fallback_list="${fallback_list:+$fallback_list, }$page"
       fallback_count=$((fallback_count + 1))
       printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$RENDER_DPI" >> "$tmp/reasons.txt"
@@ -821,7 +823,7 @@ assert_match "$LOG" "page 2: mask"
 begin "e2e masked-page: cbz still has 2 pages"
 mkdir -p "$WORK/gotmask"
 unzip -qo "$WORK/masked-page.cbz" -d "$WORK/gotmask"
-N=$(find "$WORK/gotmask" -type f | wc -l | tr -d ' ')
+N=$(find "$WORK/gotmask" -type f -size +0 | wc -l | tr -d ' ')
 assert_eq "$N" "2"
 
 begin "e2e multi-image-page: layered page falls back, other stays lossless"
@@ -847,10 +849,12 @@ render_page() {
   local pdf="$1" page="$2" tmp="$3"
   mkdir -p "$tmp/render-$page" || return 1
   pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$RENDER_DPI" \
-    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>/dev/null
-  [ -n "$(find "$tmp/render-$page" -type f | head -n 1)" ]
+    -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>"$tmp/render-$page.err"
+  [ -n "$(find "$tmp/render-$page" -type f -size +0 | head -n 1)" ]
 }
 ```
+
+`-size +0` on both the success check and the pickup keeps a 0-byte render (disk full, OOM-killed `pdftoppm`) from shipping as a corrupt page; the redirected stderr sidecar (`$tmp/render-$page.err`) lets `convert_pdf`'s failure branch surface the real `pdftoppm` error instead of a silent `2>/dev/null`.
 
 - [ ] **Step 4: Run tests to verify pass**
 
