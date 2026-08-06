@@ -1099,7 +1099,7 @@ The embedded shell script (input passed as arguments, `/bin/zsh`):
 
 ```zsh
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/Documents/GitHub/comicdown/bin"; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
@@ -1107,7 +1107,7 @@ done
 if command -v pdf2cbz >/dev/null; then
   exec pdf2cbz --notify "$@"
 fi
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'
+osascript -e 'display notification "pdf2cbz not found — install it to /opt/homebrew/bin (see github.com/jeffalldridge/comicdown)" with title "comicdown"'
 ```
 
 > **2026-08-05 amendment (code review):** Automator services run `/bin/zsh`
@@ -1180,7 +1180,7 @@ Full `quick-action/PDF to CBZ.workflow/Contents/document.wflow` (the script abov
 				<dict>
 					<key>COMMAND_STRING</key>
 					<string>export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-for d in "$HOME/Documents/GitHub/comicdown/bin" /opt/homebrew/bin /usr/local/bin; do
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/Documents/GitHub/comicdown/bin"; do
   if [ -x "$d/pdf2cbz" ]; then
     exec "$d/pdf2cbz" --notify "$@"
   fi
@@ -1188,7 +1188,7 @@ done
 if command -v pdf2cbz >/dev/null; then
   exec pdf2cbz --notify "$@"
 fi
-osascript -e 'display notification "pdf2cbz not found — clone jeffalldridge/comicdown or install pdf2cbz on your PATH" with title "comicdown"'</string>
+osascript -e 'display notification "pdf2cbz not found — install it to /opt/homebrew/bin (see github.com/jeffalldridge/comicdown)" with title "comicdown"'</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>

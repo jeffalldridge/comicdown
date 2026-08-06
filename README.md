@@ -19,9 +19,14 @@ For personal archives and DRM-free comics you already own.
 ```sh
 brew install poppler
 git clone https://github.com/jeffalldridge/comicdown.git
+cp comicdown/bin/pdf2cbz /opt/homebrew/bin/
 ```
 
-Optionally add `comicdown/bin` to your `PATH`.
+(Use `/usr/local/bin` on Intel Macs. Installing the script to a bin
+directory matters for the Quick Action: macOS privacy protection blocks
+services from executing scripts that live in `Documents`, `Desktop`, or
+`Downloads`, so running it straight from a checkout there fails with
+"Operation not permitted".)
 
 **Quick Action:** install with
 
