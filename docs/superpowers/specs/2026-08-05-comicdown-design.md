@@ -135,13 +135,19 @@ practices from day one:
 An optional **enhancement pass** slotted after fallback (step 4) and before
 zipping in step 5, operating on the renamed temp-dir images:
 
-- **AI upscale** — inspired by Upscayl's "Digital Art" model. Upscayl is a GUI
-  over Real-ESRGAN ncnn models; the same models run headless via
-  `upscayl-ncnn` / `realesrgan-ncnn-vulkan`, which fits the CLI pipeline.
-  Would be opt-in (`--upscale`), clearly marked as no longer lossless.
-- **Lossless optimize** — ImageOptim-style squeeze: `jpegtran` (lossless JPEG
-  Huffman optimization) and `oxipng` for PNGs. Truly lossless, so could
-  eventually be a default-on `--optimize` flag.
+- **AI enhance** (`--enhance`, opt-in): a two-stage restoration flow for
+  books with aggressively compressed source JPEGs. Stage 1 upscales each page
+  2x with a Real-ESRGAN-family model tuned for illustration (the engine behind
+  Upscayl's "Digital Art" mode; runs headless via `upscayl-ncnn` /
+  `realesrgan-ncnn-vulkan`), which also scrubs compression artifacts, and
+  saves at 100% JPEG quality as the intermediate. Stage 2 compresses that
+  intermediate back down ImageOptim-style (mozjpeg-class perceptual
+  encoding) to a sane size. Done well, the result is the same size or only
+  slightly larger than the original but visibly cleaner. Clearly reported as
+  not lossless.
+- **Lossless optimize** (`--optimize`): pure ImageOptim-style squeeze with no
+  pixel changes — `jpegtran` Huffman optimization and `oxipng` for PNGs.
+  Truly lossless, so could eventually default on.
 
 The v1 seam: the pipeline keeps all page images in a temp dir with final
 names before zipping, so enhancement stages are pure
