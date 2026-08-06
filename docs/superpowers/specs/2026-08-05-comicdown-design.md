@@ -102,7 +102,13 @@ temp dirs cleaned up on every exit path (trap).
 - **png-book.pdf** — Flate images → lossless PNG path.
 - **masked-page.pdf** — image + smask on one page → that page falls back,
   others stay lossless, log written.
-- **ccitt-scan.pdf** — fax-encoded page → fallback render triggers.
+- **multi-image-page.pdf** — two images layered on one page → fallback render
+  triggers for that page only.
+
+CCITT/JBIG2/JPEG2000/CMYK detection is covered by unit tests that feed the
+page classifier synthetic `pdfimages -list` output (hand-crafting valid fax
+streams for fixtures isn't worth the complexity; the fallback path they
+trigger is identical to the mask/multi-image fixtures).
 
 ## Open-source readiness
 
