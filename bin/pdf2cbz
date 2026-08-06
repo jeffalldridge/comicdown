@@ -73,6 +73,110 @@ classify_pages() {
     }'
 }
 
+page_count() { pdfinfo "$1" 2>/dev/null | awk '/^Pages:/ {print $2}'; }
+
+# find_page_image tmpdir page -> path of the single extracted image for page.
+# Filenames look like img-PPP-NNN.ext (padding unknown); parse, don't assume.
+find_page_image() {
+  local dir="$1" page="$2" f base p
+  for f in "$dir"/img-*; do
+    [ -e "$f" ] || continue
+    base="${f##*/}"
+    p="${base#img-}"
+    p="${p%%-*}"
+    if [ "$((10#$p))" -eq "$page" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# out_path pdf -> collision-free sibling .cbz path
+out_path() {
+  local base="${1%.[Pp][Dd][Ff]}"
+  [ "$base" = "$1" ] && base="$1"
+  local out="$base.cbz" n=1
+  while [ -e "$out" ]; do
+    out="$base ($n).cbz"
+    n=$((n + 1))
+  done
+  printf '%s\n' "$out"
+}
+
+# convert_pdf pdf -> prints one summary line on success
+convert_pdf() {
+  local pdf="$1"
+  [ -f "$pdf" ] || { printf '%s: no such file\n' "$pdf" >&2; return 1; }
+  local pages
+  pages=$(page_count "$pdf")
+  case "$pages" in
+    ''|*[!0-9]*) printf '%s: could not read page count (not a PDF?)\n' "$pdf" >&2; return 1 ;;
+  esac
+
+  local tmp stage
+  tmp=$(mktemp -d "$TMP_ROOT/pdf.XXXXXX")
+  stage="$tmp/stage"
+  mkdir "$stage"
+
+  local plan
+  plan=$(pdfimages -list "$pdf" 2>/dev/null | classify_pages "$pages")
+  pdfimages -p -all "$pdf" "$tmp/img" 2>/dev/null || true
+
+  local width=${#pages}
+  if [ "$width" -lt 3 ]; then width=3; fi
+  # NOTE: never use `[ cond ] && cmd` for optional steps in this script —
+  # under set -e a false condition aborts the whole run. Always if/then.
+
+  local page status reason src ext dest
+  local fallback_list="" fallback_count=0
+  : > "$tmp/reasons.txt"
+  while read -r page status reason; do
+    src=""
+    if [ "$status" = "lossless" ]; then
+      src=$(find_page_image "$tmp" "$page") || reason="missing-extraction"
+    fi
+    if [ -z "$src" ]; then
+      render_page "$pdf" "$page" "$tmp" || {
+        printf '%s: page %s failed to render\n' "$pdf" "$page" >&2; return 1; }
+      src=$(find "$tmp/render-$page" -type f | head -n 1)
+      fallback_list="${fallback_list:+$fallback_list, }$page"
+      fallback_count=$((fallback_count + 1))
+      printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$RENDER_DPI" >> "$tmp/reasons.txt"
+    fi
+    ext="${src##*.}"
+    dest=$(printf '%s/%0*d' "$stage" "$width" "$page")
+    case "$ext" in
+      tif|tiff) sips -s format png "$src" --out "$dest.png" >/dev/null ;;
+      jpeg)     cp "$src" "$dest.jpg" ;;
+      *)        cp "$src" "$dest.$ext" ;;
+    esac
+  done <<EOF
+$plan
+EOF
+
+  local out name
+  out=$(out_path "$pdf")
+  (cd "$stage" && zip -q -0 -X "$tmp/out.zip" -- *)
+  mv "$tmp/out.zip" "$out"
+  name=$(basename "$out")
+
+  local ok=$((pages - fallback_count)) summary
+  if [ "$fallback_count" -eq 0 ]; then
+    summary="$name: $pages/$pages pages lossless"
+  else
+    summary="$name: $ok/$pages pages lossless; rendered at $RENDER_DPI DPI: $fallback_list"
+    { printf '%s\n\n' "$summary"; cat "$tmp/reasons.txt"; } > "$out.log"
+  fi
+  printf '%s\n' "$summary"
+}
+
+# Rendering lands in Task 6; until then fallback pages are a hard error.
+render_page() {
+  printf 'pdf2cbz: page %s needs fallback rendering (not implemented yet)\n' "$2" >&2
+  return 1
+}
+
 main() {
   local files_count=0
   FILES=()
@@ -88,7 +192,25 @@ main() {
   done
   [ "$files_count" -gt 0 ] || { usage >&2; exit 1; }
   check_deps
-  die "conversion not implemented yet"
+
+  TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/comicdown.XXXXXX")
+  trap 'rm -rf "$TMP_ROOT"' EXIT
+
+  local i=0 failures=0 summary summaries=""
+  while [ "$i" -lt "$files_count" ]; do
+    if summary=$(convert_pdf "${FILES[$i]}"); then
+      printf '%s\n' "$summary"
+      summaries="${summaries:+$summaries
+}$summary"
+    else
+      failures=$((failures + 1))
+      summaries="${summaries:+$summaries
+}$(basename "${FILES[$i]}"): FAILED"
+    fi
+    i=$((i + 1))
+  done
+  if [ "$NOTIFY" = 1 ]; then notify "$summaries"; fi
+  [ "$failures" -eq 0 ]
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
