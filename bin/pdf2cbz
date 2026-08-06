@@ -18,7 +18,8 @@ Usage: pdf2cbz [--notify] file.pdf [more.pdf ...]
 
 Losslessly extracts the embedded page images from comic-book PDFs and packs
 them into a .cbz next to each source file. Pages that cannot be extracted
-losslessly are rendered at 300 DPI and reported.
+losslessly are rendered at their inherent page density (72-600 DPI) and
+reported.
 
 Options:
   --notify     Also report via macOS notification (used by the Quick Action)
@@ -45,9 +46,12 @@ check_deps() {
 }
 
 # classify_pages: stdin = `pdfimages -list` output, $1 = page count.
-# Prints one line per page: "<page> lossless -" or "<page> fallback <reason>".
-# Lossless requires exactly one real raster image, encoded as jpeg (DCT) or
-# image (flate), in a non-CMYK colorspace, with no masks/stencils on the page.
+# Prints one line per page: "<page> <status> <reason> <dpi>". status is
+# lossless or fallback; dpi is the page's suggested render density (max
+# x-ppi/y-ppi over its raster images, clamped 72-600) or "-" if the page has
+# no raster images. Lossless requires exactly one real raster image, encoded
+# as jpeg (DCT) or image (flate), in a non-CMYK colorspace, with no
+# masks/stencils on the page.
 classify_pages() {
   awk -v pages="$1" '
     NR <= 2 { next }          # header + separator
@@ -59,16 +63,26 @@ classify_pages() {
         if (count[page] > 1 && !(page in reason)) reason[page] = "multi-image"
         if (enc != "jpeg" && enc != "image" && !(page in reason)) reason[page] = "enc:" enc
         if ((color == "cmyk" || comp == 4) && !(page in reason)) reason[page] = "cmyk"
+        xp = $13 + 0; yp = $14 + 0
+        m = (xp > yp) ? xp : yp
+        if (m > 0 && m > ppi[page]) ppi[page] = m
       } else if (!(page in reason)) {
         reason[page] = "mask"   # smask/stencil rows need compositing
       }
     }
     END {
       for (p = 1; p <= pages; p++) {
-        if (p in reason)          print p, "fallback", reason[p]
-        else if (count[p] == 1)   print p, "lossless", "-"
-        else if (count[p] == "")  print p, "fallback", "no-image"
-        else                      print p, "fallback", "multi-image"
+        if (ppi[p] > 0) {
+          d = ppi[p]
+          if (d < 72) d = 72
+          if (d > 600) d = 600
+        } else {
+          d = "-"
+        }
+        if (p in reason)          print p, "fallback", reason[p], d
+        else if (count[p] == 1)   print p, "lossless", "-", d
+        else if (count[p] == "")  print p, "fallback", "no-image", d
+        else                      print p, "fallback", "multi-image", d
       }
     }'
 }
@@ -136,24 +150,26 @@ convert_pdf() {
   # rely on `set -e` to stop a failed step; every side-effecting command
   # (mkdir, cp, sips, zip, mv, ...) must be explicitly checked.
 
-  local page status reason src ext dest copy_failed
+  local page status reason dpi rdpi src ext dest copy_failed
   local fallback_list="" fallback_count=0
   : > "$tmp/reasons.txt"
-  while read -r page status reason; do
+  while read -r page status reason dpi; do
     copy_failed=0
     src=""
     if [ "$status" = "lossless" ]; then
       src=$(find_page_image "$tmp" "$page") || reason="missing-extraction"
     fi
     if [ -z "$src" ]; then
-      render_page "$pdf" "$page" "$tmp" || {
+      rdpi="$RENDER_DPI"
+      if [ "$dpi" != "-" ]; then rdpi="$dpi"; fi
+      render_page "$pdf" "$page" "$tmp" "$rdpi" || {
         printf '%s: page %s failed to render\n' "$pdf" "$page" >&2
         if [ -s "$tmp/render-$page.err" ]; then cat "$tmp/render-$page.err" >&2; fi
         return 1; }
       src=$(find "$tmp/render-$page" -type f -size +0 | head -n 1)
-      fallback_list="${fallback_list:+$fallback_list, }$page"
+      fallback_list="${fallback_list:+$fallback_list, }$page ($rdpi DPI)"
       fallback_count=$((fallback_count + 1))
-      printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$RENDER_DPI" >> "$tmp/reasons.txt"
+      printf 'page %s: %s — rendered at %s DPI\n' "$page" "$reason" "$rdpi" >> "$tmp/reasons.txt"
     fi
     ext="${src##*.}"
     dest=$(printf '%s/%0*d' "$stage" "$width" "$page")
@@ -184,17 +200,18 @@ EOF
   if [ "$fallback_count" -eq 0 ]; then
     summary="$name: $pages/$pages pages lossless"
   else
-    summary="$name: $ok/$pages pages lossless; rendered at $RENDER_DPI DPI: $fallback_list"
+    summary="$name: $ok/$pages pages lossless; rendered: $fallback_list"
     { printf '%s\n\n' "$summary"; cat "$tmp/reasons.txt"; } > "$out.log"
   fi
   printf '%s\n' "$summary"
 }
 
-# render_page pdf page tmp: render one page to $tmp/render-$page/ as JPEG.
+# render_page pdf page tmp [dpi]: render one page to $tmp/render-$page/ as
+# JPEG at the given DPI (defaults to RENDER_DPI when omitted).
 render_page() {
-  local pdf="$1" page="$2" tmp="$3"
+  local pdf="$1" page="$2" tmp="$3" dpi="${4:-$RENDER_DPI}"
   mkdir -p "$tmp/render-$page" || return 1
-  pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$RENDER_DPI" \
+  pdftoppm -jpeg -jpegopt "quality=$RENDER_QUALITY" -r "$dpi" \
     -f "$page" -l "$page" "$pdf" "$tmp/render-$page/page" 2>"$tmp/render-$page.err"
   [ -n "$(find "$tmp/render-$page" -type f -size +0 | head -n 1)" ]
 }

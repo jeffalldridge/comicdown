@@ -69,12 +69,12 @@ begin "e2e masked-page: summary reports the rendered page"
 assert_match "$OUT" "1/2 pages lossless"
 
 begin "e2e masked-page: summary names page 2"
-assert_match "$OUT" "rendered at 300 DPI: 2"
+assert_match "$OUT" "rendered: 2 (72 DPI)"
 
 begin "e2e masked-page: sidecar log written with reason"
 assert_file "$WORK/masked-page.cbz.log"
 LOG=$(cat "$WORK/masked-page.cbz.log")
-assert_match "$LOG" "page 2: mask"
+assert_match "$LOG" "page 2: mask — rendered at 72 DPI"
 
 begin "e2e masked-page: cbz still has 2 pages"
 mkdir -p "$WORK/gotmask"
