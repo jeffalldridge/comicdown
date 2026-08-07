@@ -61,3 +61,9 @@ the Shortcuts-app mirror of the Quick Action to `shortcuts/`.
 Spec and plan live in `docs/superpowers/`. Changes follow TDD + adversarial
 review; deliberate CLI↔app divergences are documented in the GUI repo's
 plan ("safe direction" rule). Jeff decides scope.
+
+## Decision log
+
+Every significant decision and its WHY lives in docs/DECISIONS.md — add an
+entry whenever you make a call a future contributor could not reconstruct
+from code. GUI-side decisions: ../ComicDown-GUI/docs/DECISIONS.md.
