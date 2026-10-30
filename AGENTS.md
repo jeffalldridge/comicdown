@@ -8,7 +8,7 @@ this tool's contract.
 
 ```sh
 brew install poppler shellcheck
-tests/run.sh                      # full suite (45 tests)
+tests/run.sh                      # full suite (53 tests)
 shellcheck bin/pdf2cbz tests/run.sh tests/*.test.sh
 ```
 
@@ -44,6 +44,11 @@ ICC-wrapped CMYK) → `pdfimages -p -all` extraction (filenames parsed
 padding-agnostically) → per-page verify/stage → `pdftoppm` fallback render
 at the page's inherent DPI (72–600 clamp) → store-only zip → summary +
 `.cbz.log` sidecar only when fallback occurred.
+
+Before reading, `convert_pdf` calls `ensure_local`: a cloud placeholder
+(iCloud "not downloaded", SF_DATALESS flag) is downloaded with a
+Foundation coordinated read via `osascript`, because services run with
+on-demand download disabled (plain reads fail with EDEADLK).
 
 The Quick Action (`quick-action/`) must keep its `export PATH` line
 (launchd services get a minimal PATH) and probe installed bin dirs BEFORE

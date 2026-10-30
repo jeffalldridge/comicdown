@@ -89,6 +89,44 @@ classify_pages() {
 
 page_count() { pdfinfo "$1" 2>/dev/null | awk '/^Pages:/ {print $2}'; }
 
+# is_dataless file: true if the file is a cloud placeholder (iCloud Drive
+# "not downloaded", or another File Provider such as Dropbox/OneDrive) whose
+# bytes are not on disk. That is the SF_DATALESS (0x40000000) file flag.
+is_dataless() {
+  local flags
+  flags=$(stat -f %Xf "$1" 2>/dev/null) || return 1
+  case "$flags" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+  [ $((16#$flags & 0x40000000)) -ne 0 ]
+}
+
+# materialize file: download a cloud placeholder and wait until it is local.
+# Services (the Quick Action) run with on-demand download disabled, so a
+# plain read of a placeholder fails with EDEADLK ("Resource deadlock
+# avoided") and poppler reports "not a PDF". A coordinated read through
+# Foundation makes the file provider fetch the file for us, and blocks
+# until it is done. Callers must re-check is_dataless afterwards.
+materialize() {
+  osascript -l JavaScript - "$1" >/dev/null 2>&1 <<'JXA'
+ObjC.import('Foundation');
+function run(argv) {
+  const err = Ref();
+  $.NSFileCoordinator.alloc.init.coordinateReadingItemAtURLOptionsErrorByAccessor(
+    $.NSURL.fileURLWithPath(argv[0]), 0, err, function () {});
+}
+JXA
+}
+
+# ensure_local file: make sure a cloud placeholder is downloaded before use.
+ensure_local() {
+  if ! is_dataless "$1"; then return 0; fi
+  printf '%s: downloading from cloud storage...\n' "$1" >&2
+  materialize "$1" || true
+  if is_dataless "$1"; then
+    printf '%s: file is in cloud storage and could not be downloaded (offline?)\n' "$1" >&2
+    return 1
+  fi
+}
+
 # find_page_image tmpdir page -> path of the single extracted image for page.
 # Filenames look like img-PPP-NNN.ext (padding unknown); parse, don't assume.
 find_page_image() {
@@ -122,6 +160,7 @@ out_path() {
 convert_pdf() {
   local pdf="$1"
   [ -f "$pdf" ] || { printf '%s: no such file\n' "$pdf" >&2; return 1; }
+  ensure_local "$pdf" || return 1
   local pages
   pages=$(page_count "$pdf")
   case "$pages" in

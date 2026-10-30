@@ -4,6 +4,15 @@ Lightweight decision log: every significant call and **why**. Newest first;
 supersede, never delete. GUI-side decisions live in the ComicDown-GUI repo's
 docs/DECISIONS.md.
 
+- **Download cloud placeholders with a coordinated read (`osascript`
+  JXA `NSFileCoordinator`) before reading** — the Quick Action runs as a
+  service with on-demand download of "dataless" files disabled, so a
+  plain read of a not-downloaded iCloud file fails with EDEADLK and poppler
+  reports "not a PDF". The coordinated read makes the file provider fetch
+  the file and blocks until it is local; it uses only macOS built-ins and
+  also works for other File Providers. `brctl download` was rejected: it
+  is gone on current macOS. Detection is the SF_DATALESS flag from
+  `stat -f %Xf`, so local files never invoke osascript. (2026-10-30)
 - **Smart-DPI fallback (72–600 clamp from x-ppi/y-ppi) instead of blind
   300** — render at the page's inherent pixel density: low-res art isn't
   upscaled past its own resolution, high-res scans aren't degraded; poppler
